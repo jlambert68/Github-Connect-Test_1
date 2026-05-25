@@ -29,6 +29,10 @@ export GITHUB_OAUTH_SCOPE="repo"
 go run .
 ```
 
+## SQL Schema
+
+- Token table schema is available at: `sql/create_auth_tokens.sql`
+
 ## Endpoints
 
 - `GET /` UI with:
