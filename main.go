@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// kl 1329
+// kl 1334
 
 type config struct {
 	// ServerAddr is the HTTP listen address for the backend, e.g. ":8080".
@@ -469,7 +469,9 @@ const indexHTML = `<!doctype html>
     const setOut = (msg) => { out.textContent = msg; };
     let pollingTimer = null;
     const browseState = { owner: '', repo: '', ref: 'main', path: '' };
-    const selectedFiles = new Map();
+    const committedSelectedFiles = new Map();
+    const draftSelectedFiles = new Map();
+    let importMode = false;
     const newVersionSuffix = ' (New version exists)';
 
     function clearSelect(el) {
@@ -509,7 +511,35 @@ const indexHTML = `<!doctype html>
       };
     }
 
+    function cloneSelectedFileItem(item) {
+      return {
+        key: item.key,
+        owner: item.owner,
+        repo: item.repo,
+        ref: item.ref,
+        path: item.path,
+        baseLabel: item.baseLabel,
+        label: item.label,
+        baselineContent: item.baselineContent,
+        updateAvailable: !!item.updateAvailable
+      };
+    }
+
+    function copySelectedFilesMap(source, target) {
+      target.clear();
+      for (const item of source.values()) {
+        target.set(item.key, cloneSelectedFileItem(item));
+      }
+    }
+
+    function activeSelectedFilesMap() {
+      return importMode ? draftSelectedFiles : committedSelectedFiles;
+    }
+
     function openModal() {
+      importMode = true;
+      copySelectedFilesMap(committedSelectedFiles, draftSelectedFiles);
+      renderSelectedFiles();
       appModal.classList.add('open');
       appModal.setAttribute('aria-hidden', 'false');
     }
@@ -517,6 +547,23 @@ const indexHTML = `<!doctype html>
     function closeModal() {
       appModal.classList.remove('open');
       appModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function cancelImportMode() {
+      importMode = false;
+      draftSelectedFiles.clear();
+      renderSelectedFiles();
+      closeModal();
+      setOut('Import canceled. No changes applied.');
+    }
+
+    function commitImportMode() {
+      copySelectedFilesMap(draftSelectedFiles, committedSelectedFiles);
+      importMode = false;
+      draftSelectedFiles.clear();
+      renderSelectedFiles();
+      closeModal();
+      setOut('Import applied.');
     }
 
     function setUpdateButtonsEnabled(enabled) {
@@ -527,21 +574,26 @@ const indexHTML = `<!doctype html>
     }
 
     function clearSelectedFiles() {
-      selectedFiles.clear();
+      committedSelectedFiles.clear();
+      draftSelectedFiles.clear();
       fillSelect(selectedFilesListBase, []);
       fillSelect(selectedFilesListModal, []);
     }
 
     function renderSelectedFiles(preservedKeys) {
       const selectedKeys = preservedKeys || selectedKeysFromLists();
-      const items = Array.from(selectedFiles.values())
+      const baseMap = committedSelectedFiles;
+      const modalMap = importMode ? draftSelectedFiles : committedSelectedFiles;
+      const baseItems = Array.from(baseMap.values())
         .map((item) => ({ value: item.key, label: item.label }));
-      fillSelect(selectedFilesListBase, items);
-      fillSelect(selectedFilesListModal, items);
-      if (selectedKeys.base && selectedFiles.has(selectedKeys.base)) {
+      const modalItems = Array.from(modalMap.values())
+        .map((item) => ({ value: item.key, label: item.label }));
+      fillSelect(selectedFilesListBase, baseItems);
+      fillSelect(selectedFilesListModal, modalItems);
+      if (selectedKeys.base && baseMap.has(selectedKeys.base)) {
         selectedFilesListBase.value = selectedKeys.base;
       }
-      if (selectedKeys.modal && selectedFiles.has(selectedKeys.modal)) {
+      if (selectedKeys.modal && modalMap.has(selectedKeys.modal)) {
         selectedFilesListModal.value = selectedKeys.modal;
       }
     }
@@ -568,8 +620,12 @@ const indexHTML = `<!doctype html>
     }
 
     async function addSelectedFile(owner, repo, ref, pathValue) {
+      if (!importMode) {
+        return;
+      }
+      const activeMap = activeSelectedFilesMap();
       const key = makeSelectedKey(owner, repo, ref, pathValue);
-      if (selectedFiles.has(key)) {
+      if (activeMap.has(key)) {
         setOut('Already selected: ' + pathValue);
         return;
       }
@@ -583,7 +639,7 @@ const indexHTML = `<!doctype html>
         return;
       }
       const baseLabel = owner + '/' + repo + '/' + pathValue;
-      selectedFiles.set(key, {
+      activeMap.set(key, {
         key: key,
         owner: owner,
         repo: repo,
@@ -602,9 +658,11 @@ const indexHTML = `<!doctype html>
     }
 
     function removeSelectedFileByKey(key) {
-      if (!selectedFiles.has(key)) return;
-      const item = selectedFiles.get(key);
-      selectedFiles.delete(key);
+      if (!importMode) return;
+      const activeMap = activeSelectedFilesMap();
+      if (!activeMap.has(key)) return;
+      const item = activeMap.get(key);
+      activeMap.delete(key);
       renderSelectedFiles();
       if (item && item.label) {
         setOut('Deselected file: ' + item.label);
@@ -614,20 +672,22 @@ const indexHTML = `<!doctype html>
     }
 
     function sortSelectedFiles() {
+      const activeMap = activeSelectedFilesMap();
       const previous = selectedKeysFromLists();
-      const sortedItems = Array.from(selectedFiles.values())
+      const sortedItems = Array.from(activeMap.values())
         .sort((a, b) => a.label.localeCompare(b.label));
-      selectedFiles.clear();
+      activeMap.clear();
       for (const item of sortedItems) {
-        selectedFiles.set(item.key, item);
+        activeMap.set(item.key, item);
       }
       renderSelectedFiles(previous);
       setOut('Selected files sorted.');
     }
 
     async function checkSelectedFilesForUpdates() {
+      const activeMap = activeSelectedFilesMap();
       const selectedBefore = selectedKeysFromLists();
-      const values = Array.from(selectedFiles.values());
+      const values = Array.from(activeMap.values());
       if (values.length === 0) {
         setOut('No selected files to check.');
         return;
@@ -657,8 +717,9 @@ const indexHTML = `<!doctype html>
     }
 
     async function applySelectedFileUpdates() {
+      const activeMap = activeSelectedFilesMap();
       const selectedBefore = selectedKeysFromLists();
-      const values = Array.from(selectedFiles.values());
+      const values = Array.from(activeMap.values());
       if (values.length === 0) {
         setOut('No selected files to update.');
         return;
@@ -1064,7 +1125,10 @@ const indexHTML = `<!doctype html>
       if (targetList && key) {
         targetList.value = key;
       }
-      const item = selectedFiles.get(key);
+      const lookupMap = sourceList === selectedFilesListBase
+        ? committedSelectedFiles
+        : (importMode ? draftSelectedFiles : committedSelectedFiles);
+      const item = lookupMap.get(key);
       if (item) {
         showSelectedFileSnapshot(item);
         return;
@@ -1107,10 +1171,10 @@ const indexHTML = `<!doctype html>
     });
 
     openModalButton.addEventListener('click', openModal);
-    document.getElementById('importTop').addEventListener('click', openModal);
-    document.getElementById('importBottom').addEventListener('click', openModal);
-    document.getElementById('cancelTop').addEventListener('click', closeModal);
-    document.getElementById('cancelBottom').addEventListener('click', closeModal);
+    document.getElementById('importTop').addEventListener('click', commitImportMode);
+    document.getElementById('importBottom').addEventListener('click', commitImportMode);
+    document.getElementById('cancelTop').addEventListener('click', cancelImportMode);
+    document.getElementById('cancelBottom').addEventListener('click', cancelImportMode);
 
     document.getElementById('loadRepos').addEventListener('click', loadUserRepos);
 
