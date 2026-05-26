@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+// kl 1309
+
 type config struct {
 	// ServerAddr is the HTTP listen address for the backend, e.g. ":8080".
 	ServerAddr string
@@ -390,7 +392,9 @@ const indexHTML = `<!doctype html>
     <div class="row content-actions">
       <button class="secondary" id="importBottom">Import</button>
       <button class="secondary" id="cancelBottom">Cancel</button>
-      <button class="secondary push-right" id="sortSelected">Sort</button>
+      <button class="secondary push-right" id="checkUpdates">Check for updates</button>
+      <button class="secondary" id="applyUpdates">Update</button>
+      <button class="secondary" id="sortSelected">Sort</button>
     </div>
     <div class="content-wrap">
       <p class="list-label" id="fileFullPath">Full Path: -</p>
@@ -411,6 +415,7 @@ const indexHTML = `<!doctype html>
     let pollingTimer = null;
     const browseState = { owner: '', repo: '', ref: 'main', path: '' };
     const selectedFiles = new Map();
+    const newVersionSuffix = ' (New version exists)';
 
     function clearSelect(el) {
       while (el.options.length > 0) {
@@ -443,27 +448,65 @@ const indexHTML = `<!doctype html>
       fillSelect(selectedFilesList, []);
     }
 
-    function renderSelectedFiles() {
+    function renderSelectedFiles(preservedSelectedKey) {
+      const currentSelectedKey = preservedSelectedKey || selectedFilesList.value || '';
       const items = Array.from(selectedFiles.values())
         .map((item) => ({ value: item.key, label: item.label }));
       fillSelect(selectedFilesList, items);
+      if (currentSelectedKey && selectedFiles.has(currentSelectedKey)) {
+        selectedFilesList.value = currentSelectedKey;
+      }
     }
 
     function makeSelectedKey(owner, repo, ref, pathValue) {
       return (owner || '') + '|' + (repo || '') + '|' + (ref || 'main') + '|' + (pathValue || '');
     }
 
-    function addSelectedFile(owner, repo, ref, pathValue) {
+    async function fetchFileContentData(owner, repo, ref, pathValue) {
+      const res = await fetch('/api/file-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner, repo, ref, path: pathValue })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error((data && data.error) ? data.error : 'Failed to load file content');
+      }
+      return data;
+    }
+
+    function labelWithUpdateState(item) {
+      return item.updateAvailable ? (item.baseLabel + newVersionSuffix) : item.baseLabel;
+    }
+
+    async function addSelectedFile(owner, repo, ref, pathValue) {
       const key = makeSelectedKey(owner, repo, ref, pathValue);
       if (selectedFiles.has(key)) {
         setOut('Already selected: ' + pathValue);
         return;
       }
+      const selectedBefore = selectedFilesList.value || '';
+      let baselineContent = '';
+      try {
+        const data = await fetchFileContentData(owner, repo, ref, pathValue);
+        baselineContent = typeof data.content === 'string' ? data.content : '';
+      } catch (err) {
+        setOut('Could not select file: ' + err.message);
+        return;
+      }
+      const baseLabel = owner + '/' + repo + '/' + pathValue;
       selectedFiles.set(key, {
         key: key,
-        label: owner + '/' + repo + '/' + pathValue
+        owner: owner,
+        repo: repo,
+        ref: ref || 'main',
+        path: pathValue,
+        baseLabel: baseLabel,
+        label: baseLabel,
+        baselineContent: baselineContent,
+        updateAvailable: false
       });
-      renderSelectedFiles();
+      renderSelectedFiles(selectedBefore || key);
       setOut('Selected file: ' + pathValue);
     }
 
@@ -487,11 +530,73 @@ const indexHTML = `<!doctype html>
       for (const item of sortedItems) {
         selectedFiles.set(item.key, item);
       }
-      renderSelectedFiles();
+      renderSelectedFiles(previouslySelectedKey);
       if (previouslySelectedKey && selectedFiles.has(previouslySelectedKey)) {
         selectedFilesList.value = previouslySelectedKey;
       }
       setOut('Selected files sorted.');
+    }
+
+    async function checkSelectedFilesForUpdates() {
+      const selectedBefore = selectedFilesList.value || '';
+      const values = Array.from(selectedFiles.values());
+      if (values.length === 0) {
+        setOut('No selected files to check.');
+        return;
+      }
+      let changedCount = 0;
+      for (const item of values) {
+        try {
+          const data = await fetchFileContentData(item.owner, item.repo, item.ref || 'main', item.path);
+          const latestContent = typeof data.content === 'string' ? data.content : '';
+          const hasUpdate = latestContent !== (item.baselineContent || '');
+          if (hasUpdate !== !!item.updateAvailable) {
+            changedCount++;
+          }
+          item.updateAvailable = hasUpdate;
+          item.label = labelWithUpdateState(item);
+        } catch (err) {
+          setOut('Check failed for ' + item.baseLabel + ': ' + err.message);
+          return;
+        }
+      }
+      renderSelectedFiles(selectedBefore);
+      if (changedCount === 0) {
+        setOut('Check complete. No update state changes.');
+      } else {
+        setOut('Check complete. Update flags changed for ' + changedCount + ' file(s).');
+      }
+    }
+
+    async function applySelectedFileUpdates() {
+      const selectedBefore = selectedFilesList.value || '';
+      const values = Array.from(selectedFiles.values());
+      if (values.length === 0) {
+        setOut('No selected files to update.');
+        return;
+      }
+      let updatedCount = 0;
+      for (const item of values) {
+        if (!item.updateAvailable) continue;
+        try {
+          const data = await fetchFileContentData(item.owner, item.repo, item.ref || 'main', item.path);
+          const latestContent = typeof data.content === 'string' ? data.content : '';
+          item.baselineContent = latestContent;
+          item.updateAvailable = false;
+          item.label = labelWithUpdateState(item);
+          updatedCount++;
+
+          if (selectedBefore === item.key) {
+            fileFullPath.textContent = 'Full Path: ' + (data.full_path || (item.owner + '/' + item.repo + '/' + item.path));
+            fileContent.value = latestContent;
+          }
+        } catch (err) {
+          setOut('Update failed for ' + item.baseLabel + ': ' + err.message);
+          return;
+        }
+      }
+      renderSelectedFiles(selectedBefore);
+      setOut('Update complete. Updated ' + updatedCount + ' file(s).');
     }
 
     function parseSelectedKey(key) {
@@ -638,16 +743,7 @@ const indexHTML = `<!doctype html>
     async function loadFileContent(owner, repo, ref, pathValue) {
       setOut('Loading file content for ' + pathValue + '...');
       try {
-        const res = await fetch('/api/file-content', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ owner, repo, ref, path: pathValue })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setOut(JSON.stringify(data, null, 2));
-          return;
-        }
+        const data = await fetchFileContentData(owner, repo, ref, pathValue);
         fileFullPath.textContent = 'Full Path: ' + (data.full_path || (owner + '/' + repo + '/' + pathValue));
         fileContent.value = typeof data.content === 'string' ? data.content : '';
         setOut('Loaded file content.');
@@ -840,12 +936,12 @@ const indexHTML = `<!doctype html>
       }
     });
 
-    entryList.addEventListener('dblclick', () => {
+    entryList.addEventListener('dblclick', async () => {
       const selected = entryList.selectedOptions[0];
       if (!selected) return;
       const type = selected.dataset.type || '';
       if (type !== 'file') return;
-      addSelectedFile(
+      await addSelectedFile(
         browseState.owner,
         browseState.repo,
         browseState.ref || 'main',
@@ -872,6 +968,14 @@ const indexHTML = `<!doctype html>
 
     document.getElementById('sortSelected').addEventListener('click', () => {
       sortSelectedFiles();
+    });
+
+    document.getElementById('checkUpdates').addEventListener('click', async () => {
+      await checkSelectedFilesForUpdates();
+    });
+
+    document.getElementById('applyUpdates').addEventListener('click', async () => {
+      await applySelectedFileUpdates();
     });
 
     document.getElementById('loadRepos').addEventListener('click', loadUserRepos);
