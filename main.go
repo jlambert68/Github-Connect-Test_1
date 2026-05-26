@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// kl 1315
+// kl 1329
 
 type config struct {
 	// ServerAddr is the HTTP listen address for the backend, e.g. ":8080".
@@ -332,6 +332,34 @@ const indexHTML = `<!doctype html>
     .selected-wrap {
       margin-top: 14px;
     }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      overflow: auto;
+      padding: 24px 12px;
+      z-index: 50;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-panel {
+      width: min(1040px, 100%);
+      background: #f5f7fb;
+      border-radius: 10px;
+      box-shadow: 0 30px 80px rgba(2, 6, 23, 0.35);
+    }
+    .base-wrap {
+      max-width: 980px;
+      margin: 56px auto;
+      padding: 0 20px;
+    }
+    .modal-wrap {
+      max-width: none;
+      margin: 0;
+      padding: 18px 20px 22px;
+    }
     textarea {
       width: 100%;
       min-height: 240px;
@@ -356,61 +384,88 @@ const indexHTML = `<!doctype html>
   </style>
 </head>
 <body>
-  <main class="wrap">
-    <h1>GitHub Device Flow + Repo Listing</h1>
-    <p>Log in, load your repositories, then click one repository to view its files and folders.</p>
-    <div class="row">
-      <button id="login">Log in to GitHub</button>
-      <button class="secondary" id="checkAuth">Check GitHub Login</button>
-      <button class="secondary" id="loadRepos">Load My Repos</button>
-      <button class="secondary" id="listRepo">Load Selected Repo</button>
-    </div>
-    <div class="row action-row">
-      <button class="secondary" id="importTop">Import</button>
-      <button class="secondary" id="cancelTop">Cancel</button>
-    </div>
-    <div class="row clear-row">
-      <button class="secondary" id="clearMemToken">Clear Token Memory Cache</button>
-      <button class="secondary" id="clearAllToken">Clear Token Memory + DB</button>
-    </div>
-    <p class="list-label" id="loggedInUser">Logged in user: -</p>
-    <pre class="info-box" id="out">Waiting for action...</pre>
-    <div class="lists">
-      <div>
-        <p class="list-label">Repositories</p>
-        <select id="repoList" size="14"></select>
-      </div>
-      <div>
-        <p class="list-label section-head"><span>Files and Folders</span><span id="entryPath">Path: /</span></p>
-        <select id="entryList" size="14"></select>
-      </div>
-    </div>
+  <main class="base-wrap">
+    <h1>Selected Files</h1>
     <div class="selected-wrap">
-      <p class="list-label">Selected Files (Double-click file to select/deselect)</p>
-      <select id="selectedFilesList" size="6"></select>
+      <p class="list-label">Selected Files</p>
+      <select id="selectedFilesListBase" size="10"></select>
     </div>
     <div class="row content-actions">
-      <button class="secondary" id="importBottom">Import</button>
-      <button class="secondary" id="cancelBottom">Cancel</button>
-      <button class="secondary push-right" id="checkUpdates">Check for updates</button>
-      <button class="secondary" id="applyUpdates">Update</button>
-      <button class="secondary" id="sortSelected">Sort</button>
-    </div>
-    <div class="content-wrap">
-      <p class="list-label" id="fileFullPath">Full Path: -</p>
-      <textarea id="fileContent" readonly wrap="off"></textarea>
+      <button id="openModal">Import</button>
+      <button class="secondary push-right" id="checkUpdatesBase" disabled>Check for updates</button>
+      <button class="secondary" id="applyUpdatesBase" disabled>Update</button>
+      <button class="secondary" id="sortSelectedBase">Sort</button>
     </div>
   </main>
+
+  <div class="modal-overlay" id="appModal" aria-hidden="true">
+    <div class="modal-panel">
+      <main class="wrap modal-wrap">
+        <h1>GitHub Device Flow + Repo Listing</h1>
+        <p>Log in, load your repositories, then click one repository to view its files and folders.</p>
+        <div class="row">
+          <button id="login">Log in to GitHub</button>
+          <button class="secondary" id="checkAuth">Check GitHub Login</button>
+          <button class="secondary" id="loadRepos">Load My Repos</button>
+          <button class="secondary" id="listRepo">Load Selected Repo</button>
+        </div>
+        <div class="row action-row">
+          <button class="secondary" id="importTop">Import</button>
+          <button class="secondary" id="cancelTop">Cancel</button>
+        </div>
+        <div class="row clear-row">
+          <button class="secondary" id="clearMemToken">Clear Token Memory Cache</button>
+          <button class="secondary" id="clearAllToken">Clear Token Memory + DB</button>
+        </div>
+        <p class="list-label" id="loggedInUser">Logged in user: -</p>
+        <pre class="info-box" id="out">Waiting for action...</pre>
+        <div class="lists">
+          <div>
+            <p class="list-label">Repositories</p>
+            <select id="repoList" size="14"></select>
+          </div>
+          <div>
+            <p class="list-label section-head"><span>Files and Folders</span><span id="entryPath">Path: /</span></p>
+            <select id="entryList" size="14"></select>
+          </div>
+        </div>
+        <div class="selected-wrap">
+          <p class="list-label">Selected Files (Double-click file to select/deselect)</p>
+          <select id="selectedFilesListModal" size="6"></select>
+        </div>
+        <div class="row content-actions">
+          <button class="secondary" id="importBottom">Import</button>
+          <button class="secondary" id="cancelBottom">Cancel</button>
+          <button class="secondary push-right" id="checkUpdatesModal" disabled>Check for updates</button>
+          <button class="secondary" id="applyUpdatesModal" disabled>Update</button>
+          <button class="secondary" id="sortSelectedModal">Sort</button>
+        </div>
+        <div class="content-wrap">
+          <p class="list-label" id="fileFullPath">Full Path: -</p>
+          <textarea id="fileContent" readonly wrap="off"></textarea>
+        </div>
+      </main>
+    </div>
+  </div>
   <script>
     const out = document.getElementById('out');
     const loginButton = document.getElementById('login');
     const repoList = document.getElementById('repoList');
     const entryList = document.getElementById('entryList');
     const entryPathLabel = document.getElementById('entryPath');
-    const selectedFilesList = document.getElementById('selectedFilesList');
+    const selectedFilesListBase = document.getElementById('selectedFilesListBase');
+    const selectedFilesListModal = document.getElementById('selectedFilesListModal');
     const fileFullPath = document.getElementById('fileFullPath');
     const fileContent = document.getElementById('fileContent');
     const loggedInUserLabel = document.getElementById('loggedInUser');
+    const appModal = document.getElementById('appModal');
+    const openModalButton = document.getElementById('openModal');
+    const checkUpdatesBaseButton = document.getElementById('checkUpdatesBase');
+    const checkUpdatesModalButton = document.getElementById('checkUpdatesModal');
+    const applyUpdatesBaseButton = document.getElementById('applyUpdatesBase');
+    const applyUpdatesModalButton = document.getElementById('applyUpdatesModal');
+    const sortSelectedBaseButton = document.getElementById('sortSelectedBase');
+    const sortSelectedModalButton = document.getElementById('sortSelectedModal');
     const setOut = (msg) => { out.textContent = msg; };
     let pollingTimer = null;
     const browseState = { owner: '', repo: '', ref: 'main', path: '' };
@@ -443,18 +498,51 @@ const indexHTML = `<!doctype html>
       fileContent.value = '';
     }
 
-    function clearSelectedFiles() {
-      selectedFiles.clear();
-      fillSelect(selectedFilesList, []);
+    function allSelectedLists() {
+      return [selectedFilesListBase, selectedFilesListModal];
     }
 
-    function renderSelectedFiles(preservedSelectedKey) {
-      const currentSelectedKey = preservedSelectedKey || selectedFilesList.value || '';
+    function selectedKeysFromLists() {
+      return {
+        base: selectedFilesListBase.value || '',
+        modal: selectedFilesListModal.value || ''
+      };
+    }
+
+    function openModal() {
+      appModal.classList.add('open');
+      appModal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeModal() {
+      appModal.classList.remove('open');
+      appModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function setUpdateButtonsEnabled(enabled) {
+      checkUpdatesBaseButton.disabled = !enabled;
+      checkUpdatesModalButton.disabled = !enabled;
+      applyUpdatesBaseButton.disabled = !enabled;
+      applyUpdatesModalButton.disabled = !enabled;
+    }
+
+    function clearSelectedFiles() {
+      selectedFiles.clear();
+      fillSelect(selectedFilesListBase, []);
+      fillSelect(selectedFilesListModal, []);
+    }
+
+    function renderSelectedFiles(preservedKeys) {
+      const selectedKeys = preservedKeys || selectedKeysFromLists();
       const items = Array.from(selectedFiles.values())
         .map((item) => ({ value: item.key, label: item.label }));
-      fillSelect(selectedFilesList, items);
-      if (currentSelectedKey && selectedFiles.has(currentSelectedKey)) {
-        selectedFilesList.value = currentSelectedKey;
+      fillSelect(selectedFilesListBase, items);
+      fillSelect(selectedFilesListModal, items);
+      if (selectedKeys.base && selectedFiles.has(selectedKeys.base)) {
+        selectedFilesListBase.value = selectedKeys.base;
+      }
+      if (selectedKeys.modal && selectedFiles.has(selectedKeys.modal)) {
+        selectedFilesListModal.value = selectedKeys.modal;
       }
     }
 
@@ -485,7 +573,7 @@ const indexHTML = `<!doctype html>
         setOut('Already selected: ' + pathValue);
         return;
       }
-      const selectedBefore = selectedFilesList.value || '';
+      const selectedBefore = selectedKeysFromLists();
       let baselineContent = '';
       try {
         const data = await fetchFileContentData(owner, repo, ref, pathValue);
@@ -506,7 +594,10 @@ const indexHTML = `<!doctype html>
         baselineContent: baselineContent,
         updateAvailable: false
       });
-      renderSelectedFiles(selectedBefore || key);
+      renderSelectedFiles({
+        base: selectedBefore.base || key,
+        modal: selectedBefore.modal || key
+      });
       setOut('Selected file: ' + pathValue);
     }
 
@@ -523,22 +614,19 @@ const indexHTML = `<!doctype html>
     }
 
     function sortSelectedFiles() {
-      const previouslySelectedKey = selectedFilesList.value || '';
+      const previous = selectedKeysFromLists();
       const sortedItems = Array.from(selectedFiles.values())
         .sort((a, b) => a.label.localeCompare(b.label));
       selectedFiles.clear();
       for (const item of sortedItems) {
         selectedFiles.set(item.key, item);
       }
-      renderSelectedFiles(previouslySelectedKey);
-      if (previouslySelectedKey && selectedFiles.has(previouslySelectedKey)) {
-        selectedFilesList.value = previouslySelectedKey;
-      }
+      renderSelectedFiles(previous);
       setOut('Selected files sorted.');
     }
 
     async function checkSelectedFilesForUpdates() {
-      const selectedBefore = selectedFilesList.value || '';
+      const selectedBefore = selectedKeysFromLists();
       const values = Array.from(selectedFiles.values());
       if (values.length === 0) {
         setOut('No selected files to check.');
@@ -569,7 +657,7 @@ const indexHTML = `<!doctype html>
     }
 
     async function applySelectedFileUpdates() {
-      const selectedBefore = selectedFilesList.value || '';
+      const selectedBefore = selectedKeysFromLists();
       const values = Array.from(selectedFiles.values());
       if (values.length === 0) {
         setOut('No selected files to update.');
@@ -586,7 +674,7 @@ const indexHTML = `<!doctype html>
           item.label = labelWithUpdateState(item);
           updatedCount++;
 
-          if (selectedBefore === item.key) {
+          if (selectedBefore.base === item.key || selectedBefore.modal === item.key) {
             fileFullPath.textContent = 'Full Path: ' + (data.full_path || (item.owner + '/' + item.repo + '/' + item.path));
             fileContent.value = latestContent;
           }
@@ -807,10 +895,12 @@ const indexHTML = `<!doctype html>
         setLoggedInUserLabel(data);
         if (data.logged_in) {
           loginButton.disabled = true;
+          setUpdateButtonsEnabled(true);
           setOut('Session already authenticated.');
           await loadUserRepos();
         } else {
           loginButton.disabled = false;
+          setUpdateButtonsEnabled(false);
           clearSelect(repoList);
           clearSelect(entryList);
           clearSelectedFiles();
@@ -960,16 +1050,20 @@ const indexHTML = `<!doctype html>
       );
     });
 
-    selectedFilesList.addEventListener('dblclick', () => {
-      const selected = selectedFilesList.selectedOptions[0];
+    // Only modal selected-files list supports dblclick removal.
+    selectedFilesListModal.addEventListener('dblclick', () => {
+      const selected = selectedFilesListModal.selectedOptions[0];
       if (!selected) return;
       removeSelectedFileByKey(selected.value || '');
     });
 
-    selectedFilesList.addEventListener('change', async () => {
-      const selected = selectedFilesList.selectedOptions[0];
+    async function onSelectedFileListChange(sourceList, targetList) {
+      const selected = sourceList.selectedOptions[0];
       if (!selected) return;
       const key = selected.value || '';
+      if (targetList && key) {
+        targetList.value = key;
+      }
       const item = selectedFiles.get(key);
       if (item) {
         showSelectedFileSnapshot(item);
@@ -982,19 +1076,41 @@ const indexHTML = `<!doctype html>
       }
       // Fallback only for legacy entries that might not exist in selectedFiles map.
       await loadFileContent(parsed.owner, parsed.repo, parsed.ref || 'main', parsed.path);
+    }
+
+    selectedFilesListBase.addEventListener('change', async () => {
+      await onSelectedFileListChange(selectedFilesListBase, selectedFilesListModal);
+    });
+    selectedFilesListModal.addEventListener('change', async () => {
+      await onSelectedFileListChange(selectedFilesListModal, selectedFilesListBase);
     });
 
-    document.getElementById('sortSelected').addEventListener('click', () => {
+    sortSelectedBaseButton.addEventListener('click', () => {
+      sortSelectedFiles();
+    });
+    sortSelectedModalButton.addEventListener('click', () => {
       sortSelectedFiles();
     });
 
-    document.getElementById('checkUpdates').addEventListener('click', async () => {
+    checkUpdatesBaseButton.addEventListener('click', async () => {
+      await checkSelectedFilesForUpdates();
+    });
+    checkUpdatesModalButton.addEventListener('click', async () => {
       await checkSelectedFilesForUpdates();
     });
 
-    document.getElementById('applyUpdates').addEventListener('click', async () => {
+    applyUpdatesBaseButton.addEventListener('click', async () => {
       await applySelectedFileUpdates();
     });
+    applyUpdatesModalButton.addEventListener('click', async () => {
+      await applySelectedFileUpdates();
+    });
+
+    openModalButton.addEventListener('click', openModal);
+    document.getElementById('importTop').addEventListener('click', openModal);
+    document.getElementById('importBottom').addEventListener('click', openModal);
+    document.getElementById('cancelTop').addEventListener('click', closeModal);
+    document.getElementById('cancelBottom').addEventListener('click', closeModal);
 
     document.getElementById('loadRepos').addEventListener('click', loadUserRepos);
 
