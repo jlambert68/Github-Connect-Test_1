@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// kl 1309
+// kl 1314
 
 type config struct {
 	// ServerAddr is the HTTP listen address for the backend, e.g. ":8080".
@@ -610,6 +610,17 @@ const indexHTML = `<!doctype html>
       };
     }
 
+    function showSelectedFileSnapshot(item) {
+      if (!item) return;
+      fileFullPath.textContent = 'Full Path: ' + (item.baseLabel || (item.owner + '/' + item.repo + '/' + item.path));
+      fileContent.value = typeof item.baselineContent === 'string' ? item.baselineContent : '';
+      if (item.updateAvailable) {
+        setOut('Showing selected snapshot for ' + item.path + '. A newer GitHub version exists.');
+      } else {
+        setOut('Showing selected snapshot for ' + item.path + '.');
+      }
+    }
+
     function setLoggedInUserLabel(data) {
       if (!data || !data.logged_in) {
         loggedInUserLabel.textContent = 'Logged in user: -';
@@ -958,11 +969,18 @@ const indexHTML = `<!doctype html>
     selectedFilesList.addEventListener('change', async () => {
       const selected = selectedFilesList.selectedOptions[0];
       if (!selected) return;
-      const parsed = parseSelectedKey(selected.value || '');
+      const key = selected.value || '';
+      const item = selectedFiles.get(key);
+      if (item) {
+        showSelectedFileSnapshot(item);
+        return;
+      }
+      const parsed = parseSelectedKey(key);
       if (!parsed || !parsed.owner || !parsed.repo || !parsed.path) {
         setOut('Selected file entry is invalid.');
         return;
       }
+      // Fallback only for legacy entries that might not exist in selectedFiles map.
       await loadFileContent(parsed.owner, parsed.repo, parsed.ref || 'main', parsed.path);
     });
 
